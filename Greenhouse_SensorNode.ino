@@ -1,73 +1,130 @@
-/*
-    Using wifi function of the MKR 1010 board
-*/
+/* Using wifi function of the MKR 1010 board*/
 #include <SPI.h>
 #include <WiFiNINA.h>
-#include "arduino_secrets.h"
+/* MQTT client */
 #include <PubSubClient.h>
 
-/*
-   Using DHT22 sensors for Temperature and Humidity level
-*/
+/* Using DHT22 sensors for Temperature and Humidity level   */
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <DHT_U.h>
 
-#define DHTPIN 2        // what pin we're connected to
-#define DHTTYPE DHT22   // DHT 22  (AM2302)
+#include "arduino_secrets.h"
+
+// Configure Moisture Sensor
+#define DHTPIN 2      // what pin we're connected to
+#define DHTTYPE DHT22 // DHT 22  (AM2302)
 
 DHT dht(DHTPIN, DHTTYPE);
 
-
 // Configure network here
+WiFiClient wifiClient;
+PubSubClient client(wifiClient);
 
-char ssid[] = SECRET_SSID;        //  network SSID (name)
-char pass[] = SECRET_PASS;    //  network password (use for WPA, or use as key for WEP)
-int status = WL_IDLE_STATUS;     // the Wifi radio's status
-const char* mqtt_server = "192.168.68.115"; // 
+char ssid[] = SECRET_SSID;   //  network SSID (name)
+char pass[] = SECRET_PASS;   //  network password (use for WPA, or use as key for WEP)
+int status = WL_IDLE_STATUS; // the Wifi radio's status
 
-void setup() {
-  Serial.begin(9600);
-  dht.begin();
-  // attempt to connect to WiFi network:
-  while (status != WL_CONNECTED) {
-    Serial.print("Attempting to connect to WPA SSID: ");
-    Serial.println(ssid);
-    // Connect to WPA/WPA2 network:
-    status = WiFi.begin(ssid, pass);
+// Configure MQTT values
+const char broker[] = "192.168.68.115";
+int port = 1883;
+const char topic[] = "Outside/Greenhouse";
+const char *mqttUser = "";
+const char *mqttPassword = "";
 
-    // wait 10 seconds for connection:
-    delay(10000);
-    //
-    Serial.print("SSID: ");
-    Serial.println(WiFi.SSID());
+long loopNumber = 0;
+String incomingMessage = "";
 
-    // print the MAC address of the router you're attached to:
-    byte bssid[6];
-    WiFi.BSSID(bssid);
-    Serial.print("BSSID: ");
-    
-
-    // print the received signal strength:
-    long rssi = WiFi.RSSI();
-    Serial.print("signal strength (RSSI):");
-    Serial.println(rssi);
-
-    // print the encryption type:
-    byte encryption = WiFi.encryptionType();
-    Serial.print("Encryption Type:");
-    Serial.println(encryption, HEX);
-    Serial.println();
+void connectWifi()
+{
+  Serial.print("Attempting to connect to WPA SSID: ");
+  Serial.println(ssid);
+  // failed, retry
+  while (WiFi.begin(ssid, pass) != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(5000);
   }
-
-  // you're connected now, so print out the data:
+  Serial.println("");
   Serial.println("You're connected to the network");
+  Serial.println();
 }
 
-void loop() {
+//Stuff to deal with the MQTT incoming messages
+void callback(char *topic, byte *payload, unsigned int length)
+{
+
+  Serial.println();
+  Serial.println();
+  Serial.print("Message arrived in topic: ");
+  Serial.println(topic);
+
+  incomingMessage = "";
+
+  Serial.print("Message: ");
+  for (int i = 0; i < length; i++)
+  {
+    Serial.print((char)payload[i]);
+    incomingMessage += (char)payload[i];
+  }
+
+  Serial.println();
+  Serial.println("The total message is:" + incomingMessage);
+  Serial.println("---------------------------------------------------");
+}
+
+void connectMQTT()
+{
+  client.setServer(broker, port);
+  client.setCallback(callback);
+  while (!client.connected())
+  {
+    Serial.print("Connecting to MQTT... ");
+
+    if (client.connect("SensorNode Client", mqttUser, mqttPassword))
+    {
+      Serial.println("connected!");
+    }
+    else
+    {
+      Serial.print("failed with state ");
+      Serial.println(client.state());
+      delay(2000);
+    }
+
+    client.publish("Outside/Greenhouse", "Hello from sensor");
+    client.subscribe("Outside/Greenhouse");
+  }
+}
+void setup()
+{
+  Serial.begin(9600);
+  while (!Serial)
+  {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+
+  dht.begin();
+  // attempt to connect to WiFi network and MQTT broker
+  connectWifi();
+  connectMQTT();
+}
+
+void loop()
+{
+
   // put your main code here, to run repeatedly:
   // Wait a few seconds between measurements.
   delay(2000);
+
+  client.loop();
+
+  //Are we connected to MQTT? If not, reconnect
+  if (!client.connected())
+  {
+    Serial.println("MQTT connection lost - trying again.");
+    connectMQTT();
+  }
 
   // Reading temperature or humidity takes about 250 milliseconds!
   // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
@@ -83,20 +140,25 @@ void loop() {
 
   String soilMoisture = "";
   int m = analogRead(A1);
-  if (m > 700) {
+  if (m > 700)
+  {
     soilMoisture = String(m) + ", in water";
-  } else if (m > 300) {
+  }
+  else if (m > 300)
+  {
     soilMoisture = String(m) + ", humid soil";
-  } else {
+  }
+  else
+  {
     soilMoisture = String(m) + ", dry soil";
   }
 
   // Check if any reads failed and exit early (to try again).
-  if (isnan(h) || isnan(t)) {
+  if (isnan(h) || isnan(t))
+  {
     Serial.println("Failed to read from DHT sensor!");
     return;
   }
-
 
   Serial.print("Humidity: ");
   Serial.print(h);
