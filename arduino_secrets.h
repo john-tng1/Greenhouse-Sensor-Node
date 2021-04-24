@@ -1,2 +1,2 @@
-#define SECRET_SSID "BubbleBear"
-#define SECRET_PASS "butterbing$105"
+#define SECRET_SSID [yourWifi]
+#define SECRET_PASS [your wifi password]
